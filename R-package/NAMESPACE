@@ -1,0 +1,3 @@
+useDynLib(oss, .registration=TRUE)
+import(methods, Rcpp)
+exportPattern("^[[:alpha:]]+")
