@@ -1,0 +1,159 @@
+
+
+\documentclass{article}
+
+\usepackage[noend]{algpseudocode}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+
+\title{A Note on Efficient Updates for Order Statisitcs on Moving Windows.}
+%\title{A Note on Implementing a Worst Case $\mathcal{O}({\rm log} n)$ Update to a Median Absolute Deviation.}
+
+\begin{document}
+
+\maketitle
+
+\section{Background}
+Efficiently calculating sequential updates to basic summary statistics is important when an algorithm or calculation traverses a data set in some way. For example, when a sliding window
+is used to process a large data set or analyse a stream of sensor data in real time. Importantly, for real time streamed
+data, a guaranteed maximum latency is a common requirement and, as such, it is the worst case complexity of the update that is significant. Consequently, in what follows, all measures of complexity
+are worst case unless otherwise stated.
+
+When windowing is done using a linear data structure with $\mathcal{O}(1)$ push and pop operations, such as a deque or circular buffer, the mean and variance can both be calculated
+in $\mathcal{O}(1)$ time. In contrast, order statistics, such as quantiles, require algorithms with  $\mathcal{O}(n)$ complexity. This situation can be improved by employing self balancing
+Binary Search Trees (BSTs), which support $\mathcal{O}({\rm log}n)$ insertion, removal, and bisection. The resulting update complexity for quantiles is then $\mathcal{O}({\rm log}n)$, although
+the linear data structure has to be retained to maintain the removal priority of the elements during an update.
+
+Typically, when determining n quantiles, $n+1$ BSTs are required since indexing for a BST is an $\mathcal{O}(n)$ operation. This situation can be simplified by using
+an Ordered Statistics Tree (OST) which provides an $\mathcal{O}({\rm log}n)$ indexing operation [cite algorithms book here]. When this is done, a single tree can be used
+to dynamically determine an arbitary number of quantiles. Furthermore, using an OST also allows the rank of an arbitary element to be determined in $\mathcal{O}({\rm log}n)$ time
+which, in principle, admits the efficient calculation of a wide range of useful rank based statistics.
+
+This article demonstrates how the combination of a linear sequence and an OST can be synchronised to provide a new Abstract Data Type (ADT). The resulting ADT, referred to here as an Ordered Statistics
+Window (OSW), supports operations suitable for the efficient sequential update of order and rank based statistics on a sliding window. With view to motivating the application of OSWs in practice,
+two algorithms which employ them are developed and examined in detail.
+%
+%
+\section{An Orderded Statistics Window ADT}
+In the context of efficiently determining order statistics on a moving window the following operations are pertinent.
+\begin{itemize}
+\item [{\bf update($\mathcal{W}$,x)}] Adds $x$ to the window $\mathcal{W}$ and, if the size of the resulting window is greater than a pre-specified maximum,
+  removes the oldest entry $y$ from $\mathcal{W}$.
+  It returns the ordered pair $(i,y)$ where $i$ is the rank of $x$ in $\mathcal{W}$. In the
+  case of no element being removed $y={\rm none}$.
+\item [{\bf bisect($\mathcal{W}$,x)}] Returns an ordered pair $(i,y)$ where $i$ is the rank that $x$ would have if $\mathcal{W}$ were updated with $x$, 
+  and $y$ is the smallest element in the window such that $x \leq y$. If no such $y$ exists then $y={\rm none}$.
+\item [{\bf select($\mathcal{W}$,i)}] Returns the value of the element with rank $i$ if such an element exists or ${\bf {\rm none}}$ otherwise.
+\end{itemize}
+%
+Henceforth, a data structure supporting the above operations will be refered to as an Ordered Statistics Window (OSW).
+Table \ref{table:common-data-structure-complexity} shows the worst case computational complexity for an OSW when implemented using
+some common data structures in isolation.
+%
+\begin{table}[h]%[ht]
+  % title of Table
+  \centering % used for centering table
+  \begin{tabular}{c c c c}
+    % centered columns (4 columns)
+    \hline\hline
+    %inserts double horizontal lines
+    & ${\rm update}(\mathcal{W},x)$ & ${\rm bisect}(\mathcal{W},x)$ & ${\rm select}(\mathcal{W},x)$ \\ [0.5ex]
+    \hline                  
+    array & $\mathcal{O}(n)$ & $\mathcal{O}(n)$ & $\mathcal{O}(1)$  \\
+    \hline
+    deque & $\mathcal{O}(1)$ & $\mathcal{O}(n)$ & $\mathcal{O}(n)$ \\
+    \hline
+    red-black tree & $\mathcal{O}(n)$ & $\mathcal{O}({\rm log} n)$ & $\mathcal{O}(n)$ \\
+    \hline
+    ordered statistics tree & $\mathcal{O}(n)$ & $\mathcal{O}({\rm log} n)$ & $\mathcal{O}({\rm log} n)$ \\
+    \hline
+  \end{tabular}
+  \label{table:common-data-structure-complexity}% is used to refer this table in the text
+    \caption{Computational complexity of an Ordered Statistics Window when implemented using some common data structures.}
+\end{table}
+%
+%
+Assume now that an algorithm $\mathcal{A}$ on an OSW $\mathcal{W}$ will require and update and at least one other operation, then the table 
+shows the least worst case complexity of $\mathcal{A}$ to be $\mathcal{O}(n)$. On the other hand, it also suggests the possibility of a
+composite data structure consisting of a deque $\mathcal{D}$ and an OST $\mathcal{T}$ that could reduce the best worst case complexity of $\mathcal{A}$ to $\mathcal{O}({\rm log} n)$.
+
+Let an OSW consist of a deque $\mathcal{W}.\mathcal{D}$, an OST $\mathcal{W}.\mathcal{T}$, and an positive integer $\mathcal{W}.n$ indicating the
+maximum size $\#\mathcal{W}$ of $\mathcal{W}$. 
+
+%
+%
+\section{Median Absolute Deviation}
+
+The Median Absolute Devitaion (MAD) is a robust measure of scale defined as
+%
+\begin{equation}
+{\rm mad}(X) = {\rm med}(|x_{i} - \widetilde{X}|)
+\end{equation}
+%
+where the outer median is taken over all $x_{i} \in X$.
+\subsection{Algorithm}
+
+\begin{algorithm}[h]
+\begin{algorithmic}[1]
+\Function{mad}{$T$}
+\If{$\# T = 1$}
+\State \Return $0$
+\EndIf
+\Function{bisect}{$T,(a,b),(c,d)$}
+\State $\widetilde{T} \leftarrow \frac{1}{2}(T_{\left \lceil{\# T /2 }\right \rceil - 1} + T_{\left \lfloor{\# T /2 }\right \rfloor})$
+\If{$b - a < 2$}
+\If{$\# T \% 2 = 0$}
+\State \Return $\frac{1}{2} ( \max(\widetilde{T} - T_{b},T_{c} - \widetilde{T} ) + \min(\widetilde{T} - T_{a},T_{b} - \widetilde{T}) )$
+\Else
+\State \Return $\min(\max(\widetilde{T} - T_{b},T_{c} - \widetilde{T} ),\min(T_{a} - \widetilde{T},T_{b} - \widetilde{T}))$
+\EndIf
+\EndIf
+\If{$4 \widetilde{T} > T_{a} + T_{b} + T_{c} + T_{d}$}
+\State \Return $\Call{bisect}{T,(a+\left \lfloor \frac{b-a}{2}\right \rfloor,b),(c+\left \lfloor \frac{d-c}{2}\right \rfloor,d)}$
+\Else
+\State \Return $\Call{bisect}{T,(a,a+\left \lceil \frac{b-a}{2}\right \rceil),(c,c+\left \lceil \frac{d-c}{2}\right \rceil)}$
+\EndIf
+\EndFunction
+\State \Return $\Call{bisect}{T,(0,\left \lfloor{\# T /2 }\right \rfloor - 1),(\left \lceil{\# T /2 }\right \rceil,\#T - 1)}$
+\EndFunction
+\end{algorithmic}
+\caption{\label{alg:mad-sorted} Median Absolute Deviation of a Sorted Container $T$ via Bisection}
+\end{algorithm}
+
+
+\section{Two Sample Cram\'{e}r-von Mises test.}
+
+\section{Walsh's Outlier Test}
+
+\section{Dean and Dixon Test}
+
+\section{Pearson and Hartley Test}
+
+\section{Nalimov Test}
+
+
+\section{Kruskal-Wallis Test}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\end{document}
+
+
+
